@@ -1,0 +1,15 @@
+{
+  "name": "localhorst",
+  "version": "0.1.0",
+  "description": "List and kill local dev servers running on ports 3000-9000",
+  "type": "module",
+  "bin": {
+    "localhorst": "src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
