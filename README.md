@@ -2,6 +2,8 @@
 
 Zero-dependency CLI to list and kill local dev servers on ports 3000-9000.
 
+![localhorst interactive mode](docs/interactive-mode.png)
+
 ## Install
 
 ### Homebrew (recommended)
