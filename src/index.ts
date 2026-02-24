@@ -3,6 +3,7 @@
 import { parseArgs } from "util";
 import { listCommand } from "./commands/list";
 import { killCommand } from "./commands/kill";
+import { interactiveCommand } from "./commands/interactive";
 
 const VERSION = "0.1.0";
 
@@ -11,8 +12,8 @@ const HELP = `
   List and kill local dev servers running on ports 3000–9000.
 
   Usage:
-    localhorst                  List all dev servers
-    localhorst list             Same as above
+    localhorst                  Interactive TUI (default)
+    localhorst list             Non-interactive table output
     localhorst kill <port>      Kill the process on that port
     localhorst kill --all       Kill all discovered dev servers
     localhorst kill <port> -f   Force kill (SIGKILL) if SIGTERM isn't enough
@@ -47,9 +48,13 @@ async function main() {
     process.exit(0);
   }
 
-  const command = positionals[0] ?? "list";
+  const command = positionals[0] ?? "interactive";
 
   switch (command) {
+    case "interactive":
+      await interactiveCommand();
+      break;
+
     case "list":
       await listCommand();
       break;

@@ -10,6 +10,22 @@ const YELLOW = "\x1b[33m";
 const RED = "\x1b[31m";
 const GRAY = "\x1b[90m";
 
+// Exported ANSI codes for interactive mode
+export const ANSI = {
+  RESET,
+  BOLD,
+  DIM,
+  CYAN,
+  GREEN,
+  YELLOW,
+  RED,
+  GRAY,
+  INVERSE: "\x1b[7m",
+  CLEAR_SCREEN: "\x1b[2J\x1b[H",
+  HIDE_CURSOR: "\x1b[?25l",
+  SHOW_CURSOR: "\x1b[?25h",
+};
+
 /** Shorten a path by replacing $HOME with ~ */
 function shortenPath(path: string): string {
   const home = process.env.HOME;

@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            artifact: localhorst-darwin-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            artifact: localhorst-darwin-x64
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            artifact: localhorst-linux-x64
+          - os: ubuntu-latest
+            target: bun-linux-arm64
+            artifact: localhorst-linux-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build binary
+        run: bun build src/index.ts --compile --target=${{ matrix.target }} --outfile dist/localhorst
+
+      - name: Create tarball
+        run: |
+          cd dist
+          tar czf ${{ matrix.artifact }}.tar.gz localhorst
+          shasum -a 256 ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.artifact }}.tar.gz
+            dist/${{ matrix.artifact }}.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Collect all tarballs and checksums
+          files=()
+          for dir in artifacts/*/; do
+            for file in "$dir"*; do
+              files+=("$file")
+            done
+          done
+
+          # Create release with all assets
+          gh release create "$TAG" "${files[@]}" \
+            --repo "${{ github.repository }}" \
+            --title "localhorst $TAG" \
+            --generate-notes
+
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION="${TAG#v}"
+
+          # Read SHA256 sums
+          SHA_DARWIN_ARM64=$(cat artifacts/localhorst-darwin-arm64/localhorst-darwin-arm64.tar.gz.sha256 | awk '{print $1}')
+          SHA_DARWIN_X64=$(cat artifacts/localhorst-darwin-x64/localhorst-darwin-x64.tar.gz.sha256 | awk '{print $1}')
+          SHA_LINUX_X64=$(cat artifacts/localhorst-linux-x64/localhorst-linux-x64.tar.gz.sha256 | awk '{print $1}')
+          SHA_LINUX_ARM64=$(cat artifacts/localhorst-linux-arm64/localhorst-linux-arm64.tar.gz.sha256 | awk '{print $1}')
+
+          BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
+
+          # Generate formula
+          cat > localhorst.rb << FORMULA
+          class Localhorst < Formula
+            desc "List and kill local dev servers running on ports 3000-9000"
+            homepage "https://github.com/${REPO}"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/localhorst-darwin-arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              else
+                url "${BASE_URL}/localhorst-darwin-x64.tar.gz"
+                sha256 "${SHA_DARWIN_X64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "${BASE_URL}/localhorst-linux-arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              else
+                url "${BASE_URL}/localhorst-linux-x64.tar.gz"
+                sha256 "${SHA_LINUX_X64}"
+              end
+            end
+
+            def install
+              bin.install "localhorst"
+            end
+
+            test do
+              assert_match "localhorst v#{version}", shell_output("#{bin}/localhorst --version")
+            end
+          end
+          FORMULA
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' localhorst.rb
+
+          # Clone the tap repo, update formula, push
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/ASchwad/homebrew-localhorst.git" tap
+          mkdir -p tap/Formula
+          cp localhorst.rb tap/Formula/localhorst.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/localhorst.rb
+          git commit -m "Update localhorst to ${VERSION}"
+          git push
