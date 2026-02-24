@@ -5,7 +5,7 @@ import { ANSI } from "../lib/output";
 interface State {
   processes: ProcessInfo[];
   selectedIndex: number;
-  mode: "list" | "actions";
+  mode: "list" | "actions" | "confirm-kill-all";
   message: string | null;
 }
 
@@ -29,7 +29,7 @@ function pad(str: string, width: number): string {
 }
 
 function render(): void {
-  const { RESET, BOLD, DIM, CYAN, GREEN, GRAY, INVERSE, CLEAR_SCREEN } = ANSI;
+  const { RESET, BOLD, DIM, CYAN, GREEN, RED, GRAY, INVERSE, CLEAR_SCREEN } = ANSI;
 
   let out = CLEAR_SCREEN;
 
@@ -75,13 +75,18 @@ function render(): void {
     }
   }
 
+  // Confirm kill-all prompt
+  if (state.mode === "confirm-kill-all") {
+    out += `\n${BOLD}${RED}  Kill all ${state.processes.length} process${state.processes.length === 1 ? "" : "es"}? ${RESET}${CYAN}[y]${RESET} Yes  ${CYAN}[n]${RESET} No\n`;
+  }
+
   // Message area
   if (state.message) {
     out += `\n  ${state.message}\n`;
   }
 
   // Footer
-  out += `\n${DIM}  ↑/↓ navigate · Enter select · r refresh · q quit${RESET}\n`;
+  out += `\n${DIM}  ↑/↓ navigate · Enter select · K kill all · r refresh · q quit${RESET}\n`;
 
   process.stdout.write(out);
 }
@@ -136,11 +141,49 @@ function killProcess(proc: ProcessInfo): void {
   }
 }
 
+function killAllProcesses(): void {
+  let killed = 0;
+  let failed = 0;
+  for (const proc of state.processes) {
+    try {
+      process.kill(proc.pid, "SIGTERM");
+      killed++;
+    } catch {
+      failed++;
+    }
+  }
+  if (failed > 0) {
+    state.message = `${ANSI.GREEN}  ✓${ANSI.RESET} Killed ${killed} process${killed === 1 ? "" : "es"}, ${ANSI.YELLOW}${failed} failed${ANSI.RESET}`;
+  } else {
+    state.message = `${ANSI.GREEN}  ✓${ANSI.RESET} Killed all ${killed} process${killed === 1 ? "" : "es"}`;
+  }
+}
+
 async function handleKey(key: Buffer): Promise<boolean> {
   const seq = key.toString();
 
   // Ctrl+C — always exit
   if (seq === "\x03") return false;
+
+  if (state.mode === "confirm-kill-all") {
+    switch (seq) {
+      case "y":
+      case "Y":
+        killAllProcesses();
+        await refresh();
+        render();
+        return true;
+      case "n":
+      case "N":
+      case "\x1b": // Escape
+        state.mode = "list";
+        state.message = null;
+        render();
+        return true;
+      default:
+        return true;
+    }
+  }
 
   if (state.mode === "actions") {
     const selected = state.processes[state.selectedIndex];
@@ -193,6 +236,14 @@ async function handleKey(key: Buffer): Promise<boolean> {
     case "\r": // Enter
       if (state.processes.length > 0) {
         state.mode = "actions";
+        state.message = null;
+        render();
+      }
+      return true;
+
+    case "K":
+      if (state.processes.length > 0) {
+        state.mode = "confirm-kill-all";
         state.message = null;
         render();
       }
